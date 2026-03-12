@@ -32,6 +32,8 @@ const loginUser = async (req, res) => {
                     employeeId: user.employeeId,
                     employeeName: user.employeeName,
                     role: user.role,
+                    state: user.state || '',
+                    assignedBranches: user.assignedBranches || [],
                     token: generateToken(user._id),
                 });
             } else {
@@ -44,6 +46,8 @@ const loginUser = async (req, res) => {
                 employeeId: user.employeeId,
                 employeeName: user.employeeName,
                 role: user.role,
+                state: user.state || '',
+                assignedBranches: user.assignedBranches || [],
                 token: generateToken(user._id),
             });
         }

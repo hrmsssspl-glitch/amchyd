@@ -39,7 +39,7 @@ const getUsers = async (req, res) => {
 // @route   POST /api/users
 // @access  Private/Admin
 const createUser = async (req, res) => {
-    const { employeeId, employeeName, password, role } = req.body;
+    const { employeeId, employeeName, password, role, state, assignedBranches } = req.body;
 
     try {
         const userExists = await User.findOne({ employeeId });
@@ -53,6 +53,8 @@ const createUser = async (req, res) => {
             employeeName,
             password,
             role,
+            state: state || '',
+            assignedBranches: assignedBranches || [],
         });
 
         if (user) {
@@ -76,6 +78,8 @@ const updateUser = async (req, res) => {
             user.employeeName = req.body.employeeName || user.employeeName;
             user.employeeId = req.body.employeeId || user.employeeId;
             user.role = req.body.role || user.role;
+            user.state = req.body.state !== undefined ? req.body.state : user.state;
+            user.assignedBranches = req.body.assignedBranches !== undefined ? req.body.assignedBranches : user.assignedBranches;
 
             if (req.body.password) {
                 user.password = req.body.password;
@@ -131,14 +135,16 @@ const exportUsers = async (req, res) => {
     }
 
     try {
-        const users = await User.find(query).select('employeeId employeeName role -_id');
+        const users = await User.find(query).select('employeeId employeeName role state assignedBranches -_id');
 
         // Create workbook and worksheet
         const wb = XLSX.utils.book_new();
         const ws = XLSX.utils.json_to_sheet(users.map(u => ({
             'Employee ID': u.employeeId,
             'Employee Name': u.employeeName,
-            'Role': u.role
+            'Role': u.role,
+            'State': u.state || '',
+            'Assigned Branches': (u.assignedBranches || []).join(', ')
         })));
 
         XLSX.utils.book_append_sheet(wb, ws, 'Users');

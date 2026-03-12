@@ -16,7 +16,7 @@ const organizationSchema = new mongoose.Schema(
         },
         industryType: {
             type: String,
-            enum: ['Sales', 'Service', ''],
+            enum: ['Sales', 'Service', 'Sales & Service', ''],
             default: '',
         },
         panNumber: {
@@ -39,14 +39,25 @@ const organizationSchema = new mongoose.Schema(
             type: String,
             trim: true,
         },
+        contactPerson: {
+            type: String,
+            trim: true,
+        },
+        branchGstNumber: {
+            type: String,
+            trim: true,
+        },
         websiteUrl: {
             type: String,
             trim: true,
         },
         state: {
             type: String,
-            enum: ['Andhra Pradesh', 'Telangana', ''],
             default: '',
+        },
+        branches: {
+            type: [String],
+            default: [],
         },
         branch: {
             type: String,

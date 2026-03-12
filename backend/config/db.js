@@ -9,10 +9,8 @@ const connectDB = async () => {
     const conn = await mongoose.connect(process.env.MONGODB_URI);
     console.log(`MongoDB Connected: ${conn.connection.host}`);
   } catch (error) {
-    console.error(`Error: ${error.message}`);
-    if (process.env.NODE_ENV !== 'production') {
-      process.exit(1);
-    }
+    console.error(`Error connecting to MongoDB: ${error.message}`);
+    throw error; // Rethrow to prevent app from running without DB
   }
 };
 

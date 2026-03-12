@@ -99,8 +99,11 @@ const exportOrganizations = async (req, res) => {
     try {
         const organizations = await Organization.find(query).lean();
         const data = organizations.map(o => {
-            const { _id, createdAt, updatedAt, __v, ...rest } = o;
-            return rest;
+            const { _id, createdAt, updatedAt, __v, branches, branch, ...rest } = o;
+            return {
+                ...rest,
+                Branches: branches && branches.length > 0 ? branches.join(', ') : (branch || '')
+            };
         });
 
         // Strictly Excel
@@ -140,6 +143,50 @@ const importOrganizations = async (req, res) => {
     }
 };
 
+// @desc    Get distinct state-branch options from Organization Master
+// @route   GET /api/organizations/branches
+// @access  Private
+const getBranchOptions = async (req, res) => {
+    try {
+        // Get distinct state+branch pairs that are non-empty
+        const orgs = await Organization.find(
+            { $or: [{ branches: { $exists: true, $not: { $size: 0 } } }, { branch: { $exists: true, $ne: '' } }] },
+            { state: 1, branches: 1, branch: 1, _id: 0 }
+        ).lean();
+
+        // Build a grouped structure: { state: [branch1, branch2, ...] }
+        const grouped = {};
+        const allBranches = [];
+        orgs.forEach(org => {
+            const st = org.state || 'Other';
+            if (!grouped[st]) grouped[st] = new Set();
+
+            const branchesToAdd = org.branches || (org.branch ? [org.branch] : []);
+
+            branchesToAdd.forEach(branch => {
+                if (branch) {
+                    grouped[st].add(branch);
+                    allBranches.push(branch);
+                }
+            });
+        });
+
+        // Convert sets to sorted arrays
+        const result = Object.entries(grouped).map(([state, branches]) => ({
+            state,
+            branches: [...branches].sort()
+        }));
+
+        res.json({
+            grouped: result,
+            allBranches: [...new Set(allBranches)].sort(),
+            states: result.map(r => r.state)
+        });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
 module.exports = {
     getOrganizations,
     createOrganization,
@@ -147,4 +194,5 @@ module.exports = {
     deleteOrganization,
     exportOrganizations,
     importOrganizations,
+    getBranchOptions,
 };

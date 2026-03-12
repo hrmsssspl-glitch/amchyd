@@ -7,6 +7,7 @@ const {
     deleteOrganization,
     exportOrganizations,
     importOrganizations,
+    getBranchOptions,
 } = require('../controllers/organizationController');
 const { protect, adminOnly } = require('../middleware/authMiddleware');
 
@@ -16,6 +17,7 @@ router.route('/')
 
 router.get('/export', protect, adminOnly, exportOrganizations);
 router.post('/import', protect, adminOnly, importOrganizations);
+router.get('/branches', protect, getBranchOptions);
 
 router.route('/:id')
     .put(protect, adminOnly, updateOrganization)

@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useContext } from 'react';
 import axios from 'axios';
 import { AuthContext } from '../context/AuthContext';
-import { Plus, Edit2, Trash2, Download, Upload, FileText, Search, X, Loader, Calculator, RefreshCw, FileSpreadsheet } from 'lucide-react';
+import { Plus, Edit2, Trash2, Download, Upload, FileText, Search, X, Loader, Calculator, RefreshCw, FileSpreadsheet, Eye, Printer, CheckCircle2, AlertCircle, Building2, MapPin } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 
 const AssetMaster = () => {
     const { user } = useContext(AuthContext);
+
+    const [states, setStates] = useState([]);
+    const [allBranches, setAllBranches] = useState([]);
     const [assets, setAssets] = useState([]);
     const [loading, setLoading] = useState(false);
     const [editMode, setEditMode] = useState(false);
@@ -15,17 +18,29 @@ const AssetMaster = () => {
     const [pages, setPages] = useState(1);
     const [searchTerm, setSearchTerm] = useState('');
     const [showForm, setShowForm] = useState(false);
+    const [employeesList, setEmployeesList] = useState([]);
     const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
     const [searchFilters, setSearchFilters] = useState({
-        assetNumber: '', kva: '', engineHpRange: '', branch: '',
+        assetNumber: '', kva: '', engineHpRange: '', state: '', branch: '',
         coordinator: '', customerName: '', status: '',
         purchaseOrderNo: '', poMonth: '', billingMonth: '',
-        contractPeriod: '', contractMonthsPending: '', engineerName: ''
+        contractPeriod: '', contractMonthsPending: '', engineerName: '', advisor: '',
+        contractEndMonth: ''
     });
 
+    const [selectedIds, setSelectedIds] = useState([]);
+    const [totalAssets, setTotalAssets] = useState(0);
+    const [selectAllGlobally, setSelectAllGlobally] = useState(false);
+    const [stats, setStats] = useState({ total: 0, branches: [], hpRanges: [], status: { active: 0, inactive: 0 } });
+    const [showStats, setShowStats] = useState(true);
+
+    const [showPreview, setShowPreview] = useState(false);
+    const [previewAsset, setPreviewAsset] = useState(null);
+
     const [formData, setFormData] = useState({
-        assetNumber: '', model: '', kva: '', engineHpRange: '', branch: '',
+        assetNumber: '', model: '', kva: '', engineHpRange: '', state: '', branch: '',
         customerName: '', gstNumber: '', contactPerson: '', contactNumber: '', mailId: '',
+        purchaseManagerName: '', purchaseManagerContact: '', purchaseManagerEmail: '',
         contractStartDate: '', contractEndDate: '', noOfVisits: '', typeOfVisits: '',
         contractPeriod: '', contractMonthsPending: '',
         purchaseOrderNo: '', purchaseOrderDate: '',
@@ -38,14 +53,55 @@ const AssetMaster = () => {
         q2Date: '', q2Amount: 0, q2TallyInvoiceNo: '', q2InvoiceDate: '', q2PaymentStatus: '', q2PaymentDetails: '', q2PaymentReceivedDate: '',
         q3Date: '', q3Amount: 0, q3TallyInvoiceNo: '', q3InvoiceDate: '', q3PaymentStatus: '', q3PaymentDetails: '', q3PaymentReceivedDate: '',
         q4Date: '', q4Amount: 0, q4TallyInvoiceNo: '', q4InvoiceDate: '', q4PaymentStatus: '', q4PaymentDetails: '', q4PaymentReceivedDate: '',
-        coordinator: '', engineerName: '', engineerContact: '', status: ''
+        coordinator: '', engineerName: '', engineerContact: '', advisor: '', status: 'Active', remarks: ''
     });
+
+    const [duplicateCheck, setDuplicateCheck] = useState({ loading: false, exists: false, module: '', customer: '' });
+    const [checkTimeout, setCheckTimeout] = useState(null);
 
     const isAdmin = ['Super Admin', 'Admin'].includes(user.role);
 
     useEffect(() => {
         fetchAssets();
-    }, [page]);
+        fetchStats();
+        fetchEmployees();
+        fetchMasterData();
+    }, [page, searchTerm, searchFilters]);
+
+    const fetchMasterData = async () => {
+        try {
+            const config = { headers: { Authorization: `Bearer ${user?.token}` } };
+            const { data: statesData } = await axios.get('/api/hrms/organization/states', config);
+            setStates(statesData);
+            const { data: branchesData } = await axios.get('/api/hrms/organization/branches', config);
+            setAllBranches(branchesData);
+        } catch (error) {
+            console.error('Error fetching master data:', error);
+        }
+    };
+
+    const fetchEmployees = async () => {
+        try {
+            const config = { headers: { Authorization: `Bearer ${user.token}` } };
+            const { data } = await axios.get('/api/employees?pageSize=1000', config);
+            if (data && data.employees) {
+                // Filter only actve/relevant employees if needed, for now just all
+                setEmployeesList(data.employees);
+            }
+        } catch (error) {
+            console.error('Error fetching employees:', error);
+        }
+    };
+
+    const fetchStats = async () => {
+        try {
+            const config = { headers: { Authorization: `Bearer ${user.token}` } };
+            const { data } = await axios.get('/api/assets/stats', config);
+            setStats(data);
+        } catch (error) {
+            console.error('Error fetching stats:', error);
+        }
+    };
 
     const fetchAssets = async () => {
         setLoading(true);
@@ -59,6 +115,8 @@ const AssetMaster = () => {
             const { data } = await axios.get(`/api/assets?${queryParams}`, config);
             setAssets(data.assets);
             setPages(data.pages);
+            setTotalAssets(data.total);
+            setSelectAllGlobally(false); // Reset global selection on new fetch
         } catch (error) {
             console.error('Error fetching assets:', error);
         }
@@ -76,10 +134,11 @@ const AssetMaster = () => {
 
     const resetSearch = () => {
         setSearchFilters({
-            assetNumber: '', kva: '', engineHpRange: '', branch: '',
+            assetNumber: '', kva: '', engineHpRange: '', state: '', branch: '',
             coordinator: '', customerName: '', status: '',
             purchaseOrderNo: '', poMonth: '', billingMonth: '',
-            contractPeriod: '', contractMonthsPending: '', engineerName: ''
+            contractPeriod: '', contractMonthsPending: '', engineerName: '', advisor: '',
+            contractEndMonth: ''
         });
         setSearchTerm('');
         setPage(1);
@@ -114,6 +173,7 @@ const AssetMaster = () => {
         const formDataFile = new FormData();
         formDataFile.append('file', file);
 
+        setLoading(true);
         try {
             const config = {
                 headers: {
@@ -121,12 +181,39 @@ const AssetMaster = () => {
                     'Content-Type': 'multipart/form-data'
                 }
             };
-            await axios.post('/api/assets/import', formDataFile, config);
-            alert('Assets imported successfully');
+            const { data } = await axios.post('/api/assets/import', formDataFile, config);
+
+            if (data.summary) {
+                const s = data.summary;
+                let msg = `Import Completed:\n`;
+                msg += `✅ Successfully Imported: ${s.successfullyImported}\n`;
+                msg += `⚠️ Validation Errors: ${s.validationErrors}\n`;
+                msg += `🆔 Already in Database: ${s.alreadyInDatabase}\n`;
+                msg += `📄 Duplicates in File: ${s.duplicateInFile}\n`;
+                if (s.skippedEmpty > 0) {
+                    msg += `⚪ Skipped (Empty Rows): ${s.skippedEmpty}\n`;
+                }
+                msg += `-------------------\n`;
+                msg += `Total Rows Processed: ${s.totalRows}`;
+
+                if (data.errors && data.errors.length > 0) {
+                    msg += `\n\nFirst few errors:\n` + data.errors.join('\n');
+                }
+                alert(msg);
+            } else {
+                alert(data.message || 'Assets imported successfully');
+            }
             fetchAssets();
         } catch (error) {
-            alert(error.response?.data?.message || 'Error importing file');
+            const errorData = error.response?.data;
+            if (errorData?.errors) {
+                const errorMsg = `Import failed:\n` + errorData.errors.join('\n');
+                alert(errorMsg);
+            } else {
+                alert(errorData?.message || 'Error importing file');
+            }
         }
+        setLoading(false);
     };
 
     const downloadTemplate = async () => {
@@ -186,6 +273,16 @@ const AssetMaster = () => {
                     contractPeriod: `${diffMonths} Months`,
                     contractMonthsPending: pendingMonths
                 }));
+            }
+
+            // Auto-calculate Status
+            const endDate = new Date(formData.contractEndDate);
+            endDate.setHours(0, 0, 0, 0);
+            today.setHours(0, 0, 0, 0);
+
+            const newStatus = endDate < today ? 'Inactive' : 'Active';
+            if (formData.status !== newStatus) {
+                setFormData(prev => ({ ...prev, status: newStatus }));
             }
 
             // Billing Milestones Calculation
@@ -261,6 +358,24 @@ const AssetMaster = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+
+        // Client-side Date Validation
+        const startDate = new Date(formData.contractStartDate);
+        const endDate = new Date(formData.contractEndDate);
+
+        if (isNaN(startDate.getTime())) {
+            alert('Invalid Contract Start Date. Please select a valid date.');
+            return;
+        }
+        if (isNaN(endDate.getTime())) {
+            alert('Invalid Contract End Date. Please select a valid date.');
+            return;
+        }
+
+        if (!window.confirm(`Are you sure you want to ${editMode ? 'update' : 'save'} this asset?`)) {
+            return;
+        }
+
         try {
             const config = { headers: { Authorization: `Bearer ${user.token}` } };
             if (editMode) {
@@ -295,6 +410,40 @@ const AssetMaster = () => {
         setSelectedId(asset._id);
         setEditMode(true);
         setShowForm(true);
+        setDuplicateCheck({ loading: false, exists: false, module: '', customer: '' });
+    };
+
+    const handleAssetNumberChange = (e) => {
+        const value = e.target.value.trim();
+        setFormData({ ...formData, assetNumber: e.target.value });
+
+        if (editMode) return; // Don't check duplicates in edit mode as the number is already fixed
+
+        if (checkTimeout) clearTimeout(checkTimeout);
+
+        if (!value) {
+            setDuplicateCheck({ loading: false, exists: false, module: '', customer: '' });
+            return;
+        }
+
+        const timeout = setTimeout(async () => {
+            setDuplicateCheck(prev => ({ ...prev, loading: true, exists: false }));
+            try {
+                const config = { headers: { Authorization: `Bearer ${user.token}` } };
+                const { data } = await axios.get(`/api/check-duplicate/${value}`, config);
+                setDuplicateCheck({
+                    loading: false,
+                    exists: data.exists,
+                    module: data.module || '',
+                    customer: data.customerName || ''
+                });
+            } catch (error) {
+                console.error('Duplicate check error:', error);
+                setDuplicateCheck(prev => ({ ...prev, loading: false }));
+            }
+        }, 600);
+
+        setCheckTimeout(timeout);
     };
 
     const handleDelete = async (id) => {
@@ -309,10 +458,58 @@ const AssetMaster = () => {
         }
     };
 
+    const handleBulkDelete = async () => {
+        if (selectedIds.length === 0 && !selectAllGlobally) return;
+
+        const countToDelete = selectAllGlobally ? totalAssets : selectedIds.length;
+        const confirmMsg = selectAllGlobally
+            ? `Are you sure you want to delete ALL ${totalAssets} assets matching your current filters? This action cannot be undone.`
+            : `Are you sure you want to delete ${selectedIds.length} selected assets? This action cannot be undone.`;
+
+        if (window.confirm(confirmMsg)) {
+            setLoading(true);
+            try {
+                const config = { headers: { Authorization: `Bearer ${user.token}` } };
+                const payload = selectAllGlobally
+                    ? { filters: { keyword: searchTerm, ...searchFilters } }
+                    : { ids: selectedIds };
+
+                console.log('Sending Bulk Delete Request (POST):', payload);
+                await axios.post('/api/assets/bulk-delete', payload, config);
+                setSelectedIds([]);
+                setSelectAllGlobally(false);
+                fetchAssets();
+                alert('Assets deleted successfully');
+            } catch (error) {
+                alert(error.response?.data?.message || 'Error performing bulk delete');
+            }
+            setLoading(false);
+        }
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedIds.length === assets.length) {
+            setSelectedIds([]);
+            setSelectAllGlobally(false);
+        } else {
+            setSelectedIds(assets.map(a => a._id));
+        }
+    };
+
+    const toggleSelectAsset = (id) => {
+        if (selectedIds.includes(id)) {
+            setSelectedIds(selectedIds.filter(i => i !== id));
+            setSelectAllGlobally(false);
+        } else {
+            setSelectedIds([...selectedIds, id]);
+        }
+    };
+
     const resetForm = () => {
         setFormData({
-            assetNumber: '', model: '', kva: '', engineHpRange: '', branch: '',
+            assetNumber: '', model: '', kva: '', engineHpRange: '', state: '', branch: '',
             customerName: '', gstNumber: '', contactPerson: '', contactNumber: '', mailId: '',
+            purchaseManagerName: '', purchaseManagerContact: '', purchaseManagerEmail: '',
             contractStartDate: '', contractEndDate: '', noOfVisits: '', typeOfVisits: '',
             contractPeriod: '', contractMonthsPending: '',
             purchaseOrderNo: '', purchaseOrderDate: '',
@@ -325,7 +522,7 @@ const AssetMaster = () => {
             q2Date: '', q2Amount: 0, q2TallyInvoiceNo: '', q2InvoiceDate: '', q2PaymentStatus: '', q2PaymentDetails: '', q2PaymentReceivedDate: '',
             q3Date: '', q3Amount: 0, q3TallyInvoiceNo: '', q3InvoiceDate: '', q3PaymentStatus: '', q3PaymentDetails: '', q3PaymentReceivedDate: '',
             q4Date: '', q4Amount: 0, q4TallyInvoiceNo: '', q4InvoiceDate: '', q4PaymentStatus: '', q4PaymentDetails: '', q4PaymentReceivedDate: '',
-            coordinator: '', engineerName: '', engineerContact: '', status: ''
+            coordinator: '', engineerEmpId: '', engineerName: '', engineerContact: '', advisor: '', status: 'Active', remarks: ''
         });
         setEditMode(false);
         setSelectedId(null);
@@ -342,7 +539,7 @@ const AssetMaster = () => {
         <div className="asset-master">
             <div className="flex justify-between items-center mb-6">
                 <div>
-                    <h2 style={{ margin: 0 }}>Asset Master</h2>
+                    <h2 style={{ margin: 0 }}>AMC Master</h2>
                     <p style={{ color: 'var(--text-muted)', margin: '4px 0 0' }}>Manage AMC assets, contracts and billing milestones</p>
                 </div>
                 <div className="flex gap-2">
@@ -356,6 +553,11 @@ const AssetMaster = () => {
                     <button id="btn-export-excel" type="button" className="btn-secondary" onClick={downloadFullReport}>
                         <FileSpreadsheet size={18} className="mr-2" /> Export Excel
                     </button>
+                    {(selectedIds.length > 0 || selectAllGlobally) && isAdmin && (
+                        <button id="btn-bulk-delete" className="btn-primary" onClick={handleBulkDelete} style={{ background: 'var(--primary-red)' }}>
+                            <Trash2 size={18} className="mr-2" /> Delete {selectAllGlobally ? `All ${totalAssets}` : `Selected (${selectedIds.length})`}
+                        </button>
+                    )}
                     {isAdmin && (
                         <button id="btn-add-asset" className="btn-primary" onClick={() => { resetForm(); setShowForm(!showForm); }}>
                             <Plus size={18} className="mr-2" /> {showForm ? 'Close Form' : 'Add Asset'}
@@ -363,6 +565,68 @@ const AssetMaster = () => {
                     )}
                 </div>
             </div>
+
+            {showStats && stats && (
+                <div className="stats-section no-print mb-6 overflow-x-auto pb-2 custom-scrollbar bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                    <div className="flex gap-4 min-w-max">
+                        <div className="summary-card total" style={{ flex: '1 1 280px' }}>
+                            <div className="icon-box"><Download size={24} /></div>
+                            <div className="content">
+                                <div className="label">Total Assets</div>
+                                <div className="value">{stats.total}</div>
+                            </div>
+                        </div>
+                        <div className="summary-card active" style={{ flex: '1 1 280px' }}>
+                            <div className="icon-box"><CheckCircle2 size={24} /></div>
+                            <div className="content">
+                                <div className="label">Active Assets</div>
+                                <div className="value">{stats.status?.active || 0}</div>
+                            </div>
+                        </div>
+                        <div className="summary-card inactive" style={{ flex: '1 1 280px' }}>
+                            <div className="icon-box"><AlertCircle size={24} /></div>
+                            <div className="content">
+                                <div className="label">Inactive Assets</div>
+                                <div className="value">{stats.status?.inactive || 0}</div>
+                            </div>
+                        </div>
+                        <div className="summary-card branches-count" style={{ flex: '1 1 280px' }}>
+                            <div className="icon-box"><Building2 size={24} /></div>
+                            <div className="content">
+                                <div className="label">Total Branches</div>
+                                <div className="value">{stats.branches?.length || 0}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-6 mb-6">
+                        <div className="card shadow-sm p-5 bg-white rounded-2xl border border-gray-100">
+                            <h4 className="text-sm font-bold text-gray-700 mb-5 flex items-center">
+                                <Building2 size={18} className="mr-2 text-blue-500" /> Branch Wise Breakdown
+                            </h4>
+                            <div className="flex flex-wrap gap-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                                {stats.branches.map((b, idx) => (
+                                    <div key={idx} className="breakdown-item">
+                                        {b.name} - <span className="text-blue-600 ml-1">{b.count}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="card shadow-sm p-5 bg-white rounded-2xl border border-gray-100">
+                            <h4 className="text-sm font-bold text-gray-700 mb-5 flex items-center">
+                                <Calculator size={18} className="mr-2 text-purple-500" /> Engine HP Range Breakdown
+                            </h4>
+                            <div className="flex flex-wrap gap-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                                {stats.hpRanges.map((h, idx) => (
+                                    <div key={idx} className="breakdown-item">
+                                        {h.range || 'N/A'} - <span className="text-purple-600 ml-1">{h.count}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <div className="filter-bar">
                 <div className="filter-item">
@@ -379,14 +643,24 @@ const AssetMaster = () => {
                     </div>
                 </div>
                 <div className="filter-item">
+                    <label>Filter by State</label>
+                    <select
+                        value={searchFilters.state}
+                        onChange={(e) => { setSearchFilters({ ...searchFilters, state: e.target.value, branch: '' }); setPage(1); }}
+                    >
+                        <option value="">All States</option>
+                        {states.map(s => <option key={s._id} value={s.name}>{s.name}</option>)}
+                    </select>
+                </div>
+                <div className="filter-item">
                     <label>Filter by Branch</label>
                     <select
                         value={searchFilters.branch}
                         onChange={(e) => { setSearchFilters({ ...searchFilters, branch: e.target.value }); setPage(1); }}
                     >
                         <option value="">All Branches</option>
-                        {['BALANAGAR', 'HI-Tech City', 'KARIMNAGAR', 'KATEDAN', 'NARAYANGUDA', 'NIZAMABAD', 'SURYAPET', 'UPPAL', 'WARANGAL'].map(b => (
-                            <option key={b} value={b}>{b}</option>
+                        {allBranches.filter(b => b.state === searchFilters.state).map(b => (
+                            <option key={b._id} value={b.branchName}>{b.branchName}</option>
                         ))}
                     </select>
                 </div>
@@ -398,8 +672,7 @@ const AssetMaster = () => {
                     >
                         <option value="">All Status</option>
                         <option value="Active">Active</option>
-                        <option value="Expired">Expired</option>
-                        <option value="Renewed">Renewed</option>
+                        <option value="Inactive">Inactive</option>
                     </select>
                 </div>
                 <div className="flex gap-2">
@@ -429,6 +702,10 @@ const AssetMaster = () => {
                             <input name="customerName" value={searchFilters.customerName} onChange={handleSearchChange} />
                         </div>
                         <div className="form-group">
+                            <label>Advisor</label>
+                            <input name="advisor" value={searchFilters.advisor} onChange={handleSearchChange} placeholder="Search by Advisor" />
+                        </div>
+                        <div className="form-group">
                             <label>KVA</label>
                             <input name="kva" value={searchFilters.kva} onChange={handleSearchChange} />
                         </div>
@@ -446,6 +723,13 @@ const AssetMaster = () => {
                         <div className="form-group">
                             <label>Billing Month</label>
                             <select name="billingMonth" value={searchFilters.billingMonth} onChange={handleSearchChange}>
+                                <option value="">Any</option>
+                                {months.map(m => <option key={m.val} value={m.val}>{m.label}</option>)}
+                            </select>
+                        </div>
+                        <div className="form-group">
+                            <label>Contract End Month (Renewal)</label>
+                            <select name="contractEndMonth" value={searchFilters.contractEndMonth} onChange={handleSearchChange}>
                                 <option value="">Any</option>
                                 {months.map(m => <option key={m.val} value={m.val}>{m.label}</option>)}
                             </select>
@@ -477,7 +761,21 @@ const AssetMaster = () => {
                             <div className="inline-form-grid">
                                 <div className="form-group">
                                     <label>Asset Number *</label>
-                                    <input type="text" value={formData.assetNumber} onChange={(e) => setFormData({ ...formData, assetNumber: e.target.value })} required />
+                                    <input
+                                        type="text"
+                                        value={formData.assetNumber}
+                                        onChange={handleAssetNumberChange}
+                                        required
+                                        className={duplicateCheck.exists ? 'border-red-500' : ''}
+                                        placeholder="e.g. ASSET8454"
+                                    />
+                                    {duplicateCheck.loading && <div className="text-xs text-gray-500 mt-1 flex items-center"><Loader size={12} className="animate-spin mr-1" /> Checking registry...</div>}
+                                    {duplicateCheck.exists && (
+                                        <div className="text-xs mt-1 font-medium bg-red-50 p-2 rounded border border-red-100" style={{ color: '#c0392b' }}>
+                                            <AlertCircle size={14} className="inline mr-1" />
+                                            Already registered in <strong>{duplicateCheck.module}</strong> for customer <strong>{duplicateCheck.customer}</strong>.
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="form-group">
                                     <label>Model *</label>
@@ -492,11 +790,18 @@ const AssetMaster = () => {
                                     <input type="text" value={formData.engineHpRange} onChange={(e) => setFormData({ ...formData, engineHpRange: e.target.value })} />
                                 </div>
                                 <div className="form-group">
+                                    <label>State *</label>
+                                    <select value={formData.state} onChange={(e) => setFormData({ ...formData, state: e.target.value, branch: '' })} required>
+                                        <option value="">Select State</option>
+                                        {states.map(s => <option key={s._id} value={s.name}>{s.name}</option>)}
+                                    </select>
+                                </div>
+                                <div className="form-group">
                                     <label>Branch *</label>
                                     <select value={formData.branch} onChange={(e) => setFormData({ ...formData, branch: e.target.value })} required>
                                         <option value="">Select Branch</option>
-                                        {['BALANAGAR', 'HI-Tech City', 'KARIMNAGAR', 'KATEDAN', 'NARAYANGUDA', 'NIZAMABAD', 'SURYAPET', 'UPPAL', 'WARANGAL'].map(b => (
-                                            <option key={b} value={b}>{b}</option>
+                                        {allBranches.filter(b => b.state === formData.state).map(b => (
+                                            <option key={b._id} value={b.branchName}>{b.branchName}</option>
                                         ))}
                                     </select>
                                 </div>
@@ -505,12 +810,33 @@ const AssetMaster = () => {
                                     <input type="text" value={formData.coordinator} onChange={(e) => setFormData({ ...formData, coordinator: e.target.value })} />
                                 </div>
                                 <div className="form-group">
+                                    <label>Asset Ownership - Engineer EMP Id</label>
+                                    <select
+                                        value={formData.engineerEmpId}
+                                        onChange={(e) => {
+                                            const selectedId = e.target.value;
+                                            const employee = employeesList.find(emp => emp.employeeId === selectedId);
+                                            setFormData({
+                                                ...formData,
+                                                engineerEmpId: selectedId,
+                                                engineerName: employee ? employee.employeeName : '',
+                                                engineerContact: employee ? (employee.contactNumber || employee.contactPhone || '') : ''
+                                            });
+                                        }}
+                                    >
+                                        <option value="">Select Engineer ID</option>
+                                        {employeesList.map(emp => (
+                                            <option key={emp._id} value={emp.employeeId}>{emp.employeeId} - {emp.employeeName}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="form-group">
                                     <label>Asset Ownership - Engineer</label>
-                                    <input type="text" value={formData.engineerName} onChange={(e) => setFormData({ ...formData, engineerName: e.target.value })} placeholder="Engineer Name" />
+                                    <input type="text" value={formData.engineerName} onChange={(e) => setFormData({ ...formData, engineerName: e.target.value })} placeholder="Engineer Name" readOnly style={{ backgroundColor: '#f9fafb' }} />
                                 </div>
                                 <div className="form-group">
                                     <label>Engineer - Contact Number</label>
-                                    <input type="text" value={formData.engineerContact} onChange={(e) => setFormData({ ...formData, engineerContact: e.target.value })} placeholder="Contact Number" />
+                                    <input type="text" value={formData.engineerContact} onChange={(e) => setFormData({ ...formData, engineerContact: e.target.value })} placeholder="Contact Number" readOnly style={{ backgroundColor: '#f9fafb' }} />
                                 </div>
                             </div>
                         </div>
@@ -542,8 +868,24 @@ const AssetMaster = () => {
                                     <input type="email" value={formData.mailId} onChange={(e) => setFormData({ ...formData, mailId: e.target.value })} />
                                 </div>
                                 <div className="form-group">
+                                    <label>Purchase Manager Name</label>
+                                    <input type="text" value={formData.purchaseManagerName} onChange={(e) => setFormData({ ...formData, purchaseManagerName: e.target.value })} placeholder="Manager Name" />
+                                </div>
+                                <div className="form-group">
+                                    <label>Purchase Manager Contact</label>
+                                    <input type="text" value={formData.purchaseManagerContact} onChange={(e) => setFormData({ ...formData, purchaseManagerContact: e.target.value })} placeholder="Contact Number" />
+                                </div>
+                                <div className="form-group">
+                                    <label>Purchase Manager Email</label>
+                                    <input type="email" value={formData.purchaseManagerEmail} onChange={(e) => setFormData({ ...formData, purchaseManagerEmail: e.target.value })} placeholder="Email ID" />
+                                </div>
+                                <div className="form-group">
+                                    <label>Advisor</label>
+                                    <input type="text" value={formData.advisor} onChange={(e) => setFormData({ ...formData, advisor: e.target.value })} placeholder="Advisor Name" />
+                                </div>
+                                <div className="form-group">
                                     <label>Status</label>
-                                    <input type="text" value={formData.status} onChange={(e) => setFormData({ ...formData, status: e.target.value })} placeholder="Active/Inactive" />
+                                    <input type="text" value={formData.status} readOnly style={{ background: formData.status === 'Active' ? '#e8f5e9' : '#fce4e4', color: formData.status === 'Active' ? '#2e7d32' : '#c0392b', fontWeight: 'bold' }} />
                                 </div>
                                 <div className="form-group">
                                     <label>Contract Start Date *</label>
@@ -700,36 +1042,24 @@ const AssetMaster = () => {
                                                     </div>
                                                 </div>
                                             </div>
-                                            <div className="milestone-row">
-                                                <div className="milestone-field flex-grow">
-                                                    <label>Tally Invoice No & Date</label>
-                                                    <div className="flex gap-1">
-                                                        <input type="text" value={formData[`q${i}TallyInvoiceNo`]} onChange={(e) => setFormData({ ...formData, [`q${i}TallyInvoiceNo`]: e.target.value })} placeholder="Inv No" />
-                                                        <input type="date" value={formData[`q${i}InvoiceDate`]} onChange={(e) => setFormData({ ...formData, [`q${i}InvoiceDate`]: e.target.value })} />
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="milestone-row flex gap-2">
-                                                <div className="milestone-field" style={{ width: '35%' }}>
-                                                    <label>Payment Status</label>
-                                                    <select value={formData[`q${i}PaymentStatus`]} onChange={(e) => setFormData({ ...formData, [`q${i}PaymentStatus`]: e.target.value })}>
-                                                        <option value="">Select</option>
-                                                        <option value="Yes">Yes</option>
-                                                        <option value="No">No</option>
-                                                        <option value="Pending">Pending</option>
-                                                    </select>
-                                                </div>
-                                                <div className="milestone-field flex-grow">
-                                                    <label>Payment Details & Recv Date</label>
-                                                    <div className="flex gap-1">
-                                                        <input type="text" value={formData[`q${i}PaymentDetails`]} onChange={(e) => setFormData({ ...formData, [`q${i}PaymentDetails`]: e.target.value })} placeholder="Details" />
-                                                        <input type="date" value={formData[`q${i}PaymentReceivedDate`]} onChange={(e) => setFormData({ ...formData, [`q${i}PaymentReceivedDate`]: e.target.value })} />
-                                                    </div>
-                                                </div>
-                                            </div>
                                         </div>
                                     </div>
                                 ))}
+                            </div>
+                        </div>
+
+                        {/* Section 5: Remarks */}
+                        <div className="inline-form-section">
+                            <div className="inline-form-section-title">
+                                <FileText size={18} /> Remarks
+                            </div>
+                            <div className="form-group" style={{ width: '100%' }}>
+                                <textarea
+                                    value={formData.remarks}
+                                    onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
+                                    placeholder="Enter any additional remarks or notes here..."
+                                    style={{ width: '100%', minHeight: '100px', padding: '10px', borderRadius: '8px', border: '1px solid #ccc' }}
+                                />
                             </div>
                         </div>
 
@@ -741,45 +1071,95 @@ const AssetMaster = () => {
                 </div>
             )}
 
-            <div className="table-container">
+            <div className="table-container overflow-x-auto custom-scrollbar">
+                {selectedIds.length === assets.length && assets.length > 0 && totalAssets > assets.length && !selectAllGlobally && (
+                    <div style={{ backgroundColor: '#eff6ff', padding: '0.75rem', textAlign: 'center', fontSize: '0.875rem', borderBottom: '1px solid #dbeafe' }}>
+                        All {assets.length} assets on this page are selected.
+                        <button
+                            className="ml-2 font-bold hover:underline"
+                            style={{ color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer' }}
+                            onClick={() => setSelectAllGlobally(true)}
+                        >
+                            Select all {totalAssets} assets matching current filters
+                        </button>
+                    </div>
+                )}
+                {selectAllGlobally && (
+                    <div style={{ backgroundColor: '#dbeafe', padding: '0.75rem', textAlign: 'center', fontSize: '0.875rem', borderBottom: '1px solid #bfdbfe' }}>
+                        All {totalAssets} assets matching current filters are selected.
+                        <button
+                            className="ml-2 font-bold hover:underline"
+                            style={{ color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer' }}
+                            onClick={() => {
+                                setSelectedIds([]);
+                                setSelectAllGlobally(false);
+                            }}
+                        >
+                            Clear selection
+                        </button>
+                    </div>
+                )}
                 {loading ? (
                     <div className="flex justify-center p-10"><Loader className="animate-spin" /></div>
                 ) : (
                     <table>
                         <thead>
                             <tr>
-                                <th>Asset No</th>
-                                <th>Customer Name</th>
-                                <th>Branch</th>
-                                <th>End Date</th>
-                                <th>Total Amount</th>
-                                <th>Billing Status</th>
-                                <th>Actions</th>
+                                <th style={{ width: '40px' }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={assets.length > 0 && (selectAllGlobally || selectedIds.length === assets.length)}
+                                        onChange={toggleSelectAll}
+                                    />
+                                </th>
+                                <th style={{ whiteSpace: 'nowrap', padding: '12px 8px' }}>Asset No</th>
+                                <th style={{ whiteSpace: 'nowrap', padding: '12px 8px' }}>KVA</th>
+                                <th style={{ minWidth: '200px', padding: '12px 8px' }}>Customer Name</th>
+                                <th style={{ whiteSpace: 'nowrap', padding: '12px 8px' }}>Contact Person</th>
+                                <th style={{ whiteSpace: 'nowrap', padding: '12px 8px' }}>Start Date</th>
+                                <th style={{ whiteSpace: 'nowrap', padding: '12px 8px' }}>End Date</th>
+                                <th style={{ whiteSpace: 'nowrap', padding: '12px 8px' }}>Visits</th>
+                                <th style={{ whiteSpace: 'nowrap', padding: '12px 8px' }}>Basic Amount</th>
+                                <th style={{ whiteSpace: 'nowrap', padding: '12px 8px' }}>Status</th>
+                                <th style={{ whiteSpace: 'nowrap', padding: '12px 8px' }}>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {assets.map((asset) => (
-                                <tr key={asset._id}>
-                                    <td><strong>{asset.assetNumber}</strong></td>
-                                    <td>{asset.customerName}</td>
-                                    <td>{asset.branch}</td>
-                                    <td>{new Date(asset.contractEndDate).toLocaleDateString()}</td>
-                                    <td>₹{asset.totalAmount.toLocaleString()}</td>
+                                <tr key={asset._id} className={selectedIds.includes(asset._id) ? 'selected-row' : ''}>
                                     <td>
-                                        <div style={{ fontSize: '0.8rem' }}>
-                                            Next: {asset.q1Date ? new Date(asset.q1Date).toLocaleDateString() : '-'}
-                                        </div>
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedIds.includes(asset._id)}
+                                            onChange={() => toggleSelectAsset(asset._id)}
+                                        />
                                     </td>
-                                    <td>
+                                    <td style={{ whiteSpace: 'nowrap', padding: '12px 8px' }}><strong>{asset.assetNumber}</strong></td>
+                                    <td style={{ whiteSpace: 'nowrap', padding: '12px 8px' }}>{asset.kva || '-'}</td>
+                                    <td style={{ minWidth: '200px', padding: '12px 8px' }}>{asset.customerName}</td>
+                                    <td style={{ whiteSpace: 'nowrap', padding: '12px 8px' }}>{asset.contactPerson || '-'}</td>
+                                    <td style={{ whiteSpace: 'nowrap', padding: '12px 8px' }}>{asset.contractStartDate ? new Date(asset.contractStartDate).toLocaleDateString() : '-'}</td>
+                                    <td style={{ whiteSpace: 'nowrap', padding: '12px 8px' }}>{asset.contractEndDate ? new Date(asset.contractEndDate).toLocaleDateString() : '-'}</td>
+                                    <td style={{ whiteSpace: 'nowrap', padding: '12px 8px' }}>{asset.noOfVisits || '0'}</td>
+                                    <td style={{ whiteSpace: 'nowrap', padding: '12px 8px' }}>₹{(asset.basicAmount ?? 0).toLocaleString()}</td>
+                                    <td style={{ whiteSpace: 'nowrap', padding: '12px 8px' }}>
+                                        <span className={`badge ${asset.status === 'Active' ? 'badge-user' : 'badge-admin'}`}
+                                            style={{
+                                                backgroundColor: asset.status === 'Active' ? '#dcfce7' : '#fef2f2',
+                                                color: asset.status === 'Active' ? '#15803d' : '#dc2626'
+                                            }}>
+                                            {asset.status}
+                                        </span>
+                                    </td>
+                                    <td style={{ padding: '12px 8px' }}>
                                         <div className="flex gap-2">
+                                            <button className="p-1.5 hover:bg-blue-50 text-blue-600 rounded" title="Preview" onClick={() => { setPreviewAsset(asset); setShowPreview(true); }}><Eye size={16} /></button>
                                             {isAdmin ? (
                                                 <>
-                                                    <button className="p-2 hover:bg-gray-100 rounded" onClick={() => handleEdit(asset)}><Edit2 size={16} /></button>
-                                                    <button className="p-2 hover:bg-red-50 text-red rounded" onClick={() => handleDelete(asset._id)}><Trash2 size={16} /></button>
+                                                    <button className="p-1.5 hover:bg-gray-100 rounded" onClick={() => handleEdit(asset)}><Edit2 size={16} /></button>
+                                                    <button className="p-1.5 hover:bg-red-50 text-red rounded" onClick={() => handleDelete(asset._id)}><Trash2 size={16} /></button>
                                                 </>
-                                            ) : (
-                                                <span className="text-muted" style={{ fontSize: '0.8rem' }}>View Only</span>
-                                            )}
+                                            ) : null}
                                         </div>
                                     </td>
                                 </tr>
@@ -788,14 +1168,265 @@ const AssetMaster = () => {
                     </table>
                 )}
 
-                <div className="flex justify-between items-center p-4 border-t">
-                    <div className="text-sm text-gray-500">Page {page} of {pages}</div>
-                    <div className="flex gap-2">
-                        <button disabled={page === 1} onClick={() => setPage(page - 1)} className="btn-secondary" style={{ padding: '0.4rem 1rem' }}>Prev</button>
-                        <button disabled={page === pages} onClick={() => setPage(page + 1)} className="btn-secondary" style={{ padding: '0.4rem 1rem' }}>Next</button>
+                <div className="flex justify-between items-center p-4 border-t" style={{ fontSize: '0.85rem' }}>
+                    <div className="text-gray-600">Showing page {page} of {pages > 0 ? pages : 1} entries</div>
+                    <div className="pagination-controls">
+                        <button disabled={page === 1} onClick={() => setPage(page - 1)}>Previous</button>
+                        <button className="active">{page}</button>
+                        <button disabled={page === pages || pages === 0} onClick={() => setPage(page + 1)}>Next</button>
                     </div>
                 </div>
             </div>
+
+            {/* Asset Preview Modal */}
+            {showPreview && previewAsset && (
+                <div style={{
+                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                    background: 'rgba(0,0,0,0.6)', zIndex: 9999,
+                    display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+                    overflowY: 'auto', padding: '2rem 1rem'
+                }} className="no-print">
+                    <div id="asset-preview-content" style={{
+                        background: '#fff', borderRadius: '12px', width: '100%', maxWidth: '900px',
+                        boxShadow: '0 20px 60px rgba(0,0,0,0.3)', overflow: 'hidden'
+                    }}>
+                        {/* Preview Header */}
+                        <div style={{
+                            background: 'linear-gradient(135deg, #c0392b, #e74c3c)',
+                            color: '#fff', padding: '1.5rem 2rem',
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                        }}>
+                            <div>
+                                <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700 }}>Asset Details Preview</h2>
+                                <p style={{ margin: '4px 0 0', opacity: 0.85, fontSize: '0.9rem' }}>Asset No: <strong>{previewAsset.assetNumber}</strong></p>
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.75rem' }}>
+                                <button onClick={() => window.print()} style={{
+                                    background: '#fff', color: '#c0392b', border: 'none',
+                                    borderRadius: '8px', padding: '0.5rem 1.2rem',
+                                    cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px'
+                                }}>
+                                    <Printer size={16} /> Print to PDF
+                                </button>
+                                <button onClick={() => setShowPreview(false)} style={{
+                                    background: 'rgba(255,255,255,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.4)',
+                                    borderRadius: '8px', padding: '0.5rem 1rem', cursor: 'pointer', fontWeight: 600
+                                }}>
+                                    <X size={16} style={{ verticalAlign: 'middle' }} /> Close
+                                </button>
+                            </div>
+                        </div>
+
+                        <div style={{ padding: '2rem' }}>
+                            {/* Section 1: Basic Asset Details */}
+                            <div style={{ marginBottom: '1.5rem' }}>
+                                <h4 style={{ color: '#c0392b', borderBottom: '2px solid #fce4e4', paddingBottom: '0.5rem', margin: '0 0 1rem' }}>Basic Asset Details</h4>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
+                                    {[['Asset Number', previewAsset.assetNumber], ['Model', previewAsset.model], ['KVA', previewAsset.kva], ['Engine HP Range', previewAsset.engineHpRange], ['Branch', previewAsset.branch], ['Coordinator', previewAsset.coordinator], ['Engineer Name', previewAsset.engineerName], ['Engineer Contact', previewAsset.engineerContact], ['Status', previewAsset.status], ['Remarks', previewAsset.remarks]].map(([label, val]) => (
+                                        <div key={label} style={{ background: '#f8f9fa', borderRadius: '8px', padding: '0.75rem' }}>
+                                            <div style={{ fontSize: '0.75rem', color: '#888', marginBottom: '2px' }}>{label}</div>
+                                            <div style={{ fontWeight: 600, color: '#222' }}>{val || '-'}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Section 2: Customer & Contract */}
+                            <div style={{ marginBottom: '1.5rem' }}>
+                                <h4 style={{ color: '#c0392b', borderBottom: '2px solid #fce4e4', paddingBottom: '0.5rem', margin: '0 0 1rem' }}>Customer & Contract Information</h4>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
+                                    {[
+                                        ['Customer Name', previewAsset.customerName],
+                                        ['GST Number', previewAsset.gstNumber],
+                                        ['Contact Person', previewAsset.contactPerson],
+                                        ['Contact Number', previewAsset.contactNumber],
+                                        ['Mail ID', previewAsset.mailId],
+                                        ['Purchase Manager Name', previewAsset.purchaseManagerName],
+                                        ['Purchase Manager Contact', previewAsset.purchaseManagerContact],
+                                        ['Purchase Manager Email', previewAsset.purchaseManagerEmail],
+                                        ['Advisor', previewAsset.advisor],
+                                        ['Contract Start Date', previewAsset.contractStartDate ? new Date(previewAsset.contractStartDate).toLocaleDateString() : '-'],
+                                        ['Contract End Date', previewAsset.contractEndDate ? new Date(previewAsset.contractEndDate).toLocaleDateString() : '-'],
+                                        ['Contract Period', previewAsset.contractPeriod],
+                                        ['Months Pending', previewAsset.contractMonthsPending],
+                                        ['No. of Visits', previewAsset.noOfVisits],
+                                        ['Type of Visits', previewAsset.typeOfVisits],
+                                    ].map(([label, val]) => (
+                                        <div key={label} style={{ background: '#f8f9fa', borderRadius: '8px', padding: '0.75rem' }}>
+                                            <div style={{ fontSize: '0.75rem', color: '#888', marginBottom: '2px' }}>{label}</div>
+                                            <div style={{ fontWeight: 600, color: '#222' }}>{val || '-'}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Section 3: PO & Financials */}
+                            <div style={{ marginBottom: '1.5rem' }}>
+                                <h4 style={{ color: '#c0392b', borderBottom: '2px solid #fce4e4', paddingBottom: '0.5rem', margin: '0 0 1rem' }}>PO & Financial Details</h4>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
+                                    {[
+                                        ['PO Type', previewAsset.poType],
+                                        ['PO Number', previewAsset.purchaseOrderNo],
+                                        ['PO Date', previewAsset.purchaseOrderDate ? new Date(previewAsset.purchaseOrderDate).toLocaleDateString() : '-'],
+                                        ['Actual PO Received', previewAsset.actualPOReceived],
+                                        ['Actual PO Received Date', previewAsset.actualPoReceivedDate ? new Date(previewAsset.actualPoReceivedDate).toLocaleDateString() : '-'],
+                                        ['Quotation No', previewAsset.quotationNo],
+                                        ['Quotation Date', previewAsset.quoteDate ? new Date(previewAsset.quoteDate).toLocaleDateString() : '-'],
+                                        ['Payment Terms', previewAsset.paymentTerms],
+                                        ['Billing Type', previewAsset.billingType],
+                                    ].map(([label, val]) => (
+                                        <div key={label} style={{ background: '#f8f9fa', borderRadius: '8px', padding: '0.75rem' }}>
+                                            <div style={{ fontSize: '0.75rem', color: '#888', marginBottom: '2px' }}>{label}</div>
+                                            <div style={{ fontWeight: 600, color: '#222' }}>{val || '-'}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                                {/* Amount Summary Bar */}
+                                <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+                                    <div style={{ flex: 1, background: '#e8f5e9', borderRadius: '10px', padding: '1rem', textAlign: 'center' }}>
+                                        <div style={{ fontSize: '0.75rem', color: '#555' }}>Basic Amount</div>
+                                        <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#2e7d32' }}>₹{(previewAsset.basicAmount ?? 0).toLocaleString()}</div>
+                                    </div>
+                                    <div style={{ flex: 1, background: '#fff3e0', borderRadius: '10px', padding: '1rem', textAlign: 'center' }}>
+                                        <div style={{ fontSize: '0.75rem', color: '#555' }}>GST (18%)</div>
+                                        <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#e65100' }}>₹{(previewAsset.gstAmount ?? 0).toLocaleString()}</div>
+                                    </div>
+                                    <div style={{ flex: 1, background: '#fce4e4', borderRadius: '10px', padding: '1rem', textAlign: 'center' }}>
+                                        <div style={{ fontSize: '0.75rem', color: '#555' }}>Total Amount</div>
+                                        <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#c0392b' }}>₹{(previewAsset.totalAmount ?? 0).toLocaleString()}</div>
+                                    </div>
+                                    <div style={{ flex: 1, background: '#e3f2fd', borderRadius: '10px', padding: '1rem', textAlign: 'center' }}>
+                                        <div style={{ fontSize: '0.75rem', color: '#555' }}>Last Year Basic</div>
+                                        <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#1565c0' }}>₹{(previewAsset.lastYearPriceBasic ?? 0).toLocaleString()}</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Section 4: Billing Milestones */}
+                            <div>
+                                <h4 style={{ color: '#c0392b', borderBottom: '2px solid #fce4e4', paddingBottom: '0.5rem', margin: '0 0 1rem' }}>Billing Milestones</h4>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
+                                    {[1, 2, 3, 4].map(i => {
+                                        const date = previewAsset[`q${i}Date`];
+                                        const amount = previewAsset[`q${i}Amount`];
+                                        const invNo = previewAsset[`q${i}TallyInvoiceNo`];
+                                        const invDate = previewAsset[`q${i}InvoiceDate`];
+                                        const payStatus = previewAsset[`q${i}PaymentStatus`];
+                                        const payDetails = previewAsset[`q${i}PaymentDetails`];
+                                        const payRecv = previewAsset[`q${i}PaymentReceivedDate`];
+                                        const statusColor = payStatus === 'Yes' ? '#2e7d32' : payStatus === 'No' ? '#c0392b' : '#e65100';
+                                        return (
+                                            <div key={i} style={{ border: '1px solid #eee', borderRadius: '10px', padding: '1rem', background: '#fafafa' }}>
+                                                <div style={{ fontWeight: 700, color: '#c0392b', marginBottom: '0.75rem', fontSize: '0.95rem' }}>Milestone {i}</div>
+                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                                                    {[
+                                                        ['Schedule Date', date ? new Date(date).toLocaleDateString() : '-'],
+                                                        ['Amount', amount ? `₹${Number(amount).toLocaleString()}` : '-'],
+                                                        ['Invoice No', invNo],
+                                                        ['Invoice Date', invDate ? new Date(invDate).toLocaleDateString() : '-'],
+                                                        ['Payment Details', payDetails],
+                                                        ['Payment Recv Date', payRecv ? new Date(payRecv).toLocaleDateString() : '-'],
+                                                    ].map(([lbl, v]) => (
+                                                        <div key={lbl}>
+                                                            <div style={{ fontSize: '0.7rem', color: '#999' }}>{lbl}</div>
+                                                            <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{v || '-'}</div>
+                                                        </div>
+                                                    ))}
+                                                    <div style={{ gridColumn: '1 / -1' }}>
+                                                        <div style={{ fontSize: '0.7rem', color: '#999' }}>Payment Status</div>
+                                                        <div style={{ display: 'inline-block', padding: '2px 10px', borderRadius: '20px', background: payStatus ? statusColor + '22' : '#eee', color: payStatus ? statusColor : '#999', fontWeight: 700, fontSize: '0.85rem', marginTop: '2px' }}>
+                                                            {payStatus || '-'}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Print Styles */}
+            <style>{`
+            /* Summary Cards Styling */
+            .summary-card {
+                display: flex;
+                align-items: center;
+                padding: 1.25rem;
+                border-radius: 16px;
+                background: #fff;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+                border: 1px solid rgba(0,0,0,0.03);
+                transition: transform 0.2s;
+            }
+            .summary-card:hover { transform: translateY(-2px); }
+            .summary-card .icon-box {
+                padding: 12px;
+                border-radius: 12px;
+                margin-right: 1rem;
+            }
+            .summary-card.total .icon-box { background: #e0f2fe; color: #0369a1; }
+            .summary-card.active .icon-box { background: #dcfce7; color: #15803d; }
+            .summary-card.inactive .icon-box { background: #fef2f2; color: #dc2626; }
+            .summary-card.branches-count .icon-box { background: #f3e8ff; color: #7e22ce; }
+            
+            .summary-card .label { font-size: 0.85rem; color: #64748b; font-weight: 500; }
+            .summary-card .value { font-size: 1.75rem; font-weight: 800; color: #1e293b; }
+
+            /* Breakdown Lists */
+            .breakdown-item {
+                display: inline-flex;
+                align-items: center;
+                padding: 6px 12px;
+                background: #f8fafc;
+                border-radius: 20px;
+                border: 1px solid #e2e8f0;
+                margin-bottom: 4px;
+                font-size: 0.8rem;
+                font-weight: 700;
+                color: #1e293b;
+                transition: all 0.2s;
+            }
+            .breakdown-item:hover {
+                background: #f1f5f9;
+                transform: translateY(-1px);
+            }
+
+            .table-container {
+                background: white;
+                border-radius: 16px;
+                overflow-x: auto !important;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+                margin-top: 1.5rem;
+                border: 1px solid #eef0f2;
+            }
+            .table-container table {
+                min-width: 1300px;
+            }
+            
+            @media print {
+                body > * { display: none !important; }
+                #asset-preview-content { 
+                    display: block !important; 
+                    position: absolute !important; 
+                    left: 0 !important; 
+                    top: 0 !important; 
+                    width: 100% !important; 
+                    box-shadow: none !important; 
+                    border-radius: 0 !important; 
+                    background: white !important;
+                }
+                #asset-preview-content * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                .no-print { display: none !important; }
+            }
+
+            .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+            .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
+            .custom-scrollbar::-webkit-scrollbar-thumb { background: #888; border-radius: 10px; }
+        `}</style>
         </div>
     );
 };

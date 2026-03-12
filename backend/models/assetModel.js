@@ -88,6 +88,21 @@ const assetSchema = mongoose.Schema({
     coordinator: { type: String },
     engineerName: { type: String },
     engineerContact: { type: String },
+
+    // Inactive Followup Fields
+    inactiveFollowups: [{
+        employeeId: { type: String },
+        employeeName: { type: String },
+        empContactNumber: { type: String },
+        followUpDate: { type: Date },
+        customerContactedName: { type: String },
+        customerContactNumber: { type: String },
+        customerContactEmail: { type: String },
+        remarks: { type: String },
+        poStatus: { type: String, enum: ['PO Received', 'Not Received', 'Pending', ''] },
+        createdAt: { type: Date, default: Date.now }
+    }],
+
     status: { type: String, default: 'Active' }
 }, {
     timestamps: true

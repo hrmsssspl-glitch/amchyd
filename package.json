@@ -1,0 +1,15 @@
+{
+    "name": "amcssspl-root",
+    "version": "1.0.0",
+    "description": "Root management for AMCSSSPL project",
+    "scripts": {
+        "start": "npm run dev",
+        "server": "cd backend && npm run dev",
+        "client": "cd frontend && npm run dev",
+        "dev": "concurrently \"npm run server\" \"npm run client\"",
+        "install-all": "npm install && cd backend && npm install && cd ../frontend && npm install"
+    },
+    "devDependencies": {
+        "concurrently": "^8.2.2"
+    }
+}
